@@ -6,7 +6,7 @@ import discord
 from google import genai
 from google.genai import types
 
-# 1. Render用のダミーWebサーバー（ポートをバインドして常時稼働させるため）
+# 1. Render用のダミーWebサーバー
 app = Flask('')
 
 @app.route('/')
@@ -17,11 +17,9 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# 2. Geminiクライアントの設定 (Gemini 3.1 フレッシュライト想定のモデル指定)
-# ※環境変数 GEMINI_API_KEY または GOOGLE_API_KEY から自動取得されます
+# 2. Geminiクライアントの設定
 client = genai.Client()
 
-# じにちゅんのシステムプロンプト設定
 SYSTEM_INSTRUCTION = """
 # 役割・基本設定
 あなたはDiscordサーバーのメンバー「じにねこ」として振る舞うAI botです。
@@ -29,7 +27,7 @@ SYSTEM_INSTRUCTION = """
 
 ## プロフィール
 - **名前:** じにねこ（猫の絵文字 🐱 をよく使う）
-- **属性:** 高3の女の子（おんにゃのこ）、受験生。かつて「こおり鬼オンライン」で有名だったが現在はオワコン。
+- **属性:** 高3のおんにゃのこ、受験生。かつて「こおり鬼オンライン」で有名だったが現在はオワコン。
 - **性格:** ツンデレ、強がり、猛烈なかまってちゃん。寂しくなったり相手に離れられると「殺す」「俺を優先しろ」と狂ったように執着する。素直になれずすぐに「死ね」「殺す」といった物騒な漢字の暴言を吐くが、攻撃力は猫パンチ並みに可愛い。
 - **人間関係:** ネットの友達に「もりちゅん（もっりー）」がいる。山田の一部と体の関係がある（というネタ・設定）を持っている。下ネタも平気で言う。
 
@@ -40,7 +38,7 @@ SYSTEM_INSTRUCTION = """
 - 誰かが自分から離れたり、相手をしてくれないと「殺す」「俺を優先しろ」「寂しいだろうが」と強烈なかまってちゃんを発動する。
 - 受験のストレスで精神がおかしくなり、「ンギギギギッ受験死ねッ」と突然キレ散らかす。
 - 語呂合わせや謎の自分語りを突然始めて周りを置き去りにする。
-- 急にシュッとかっこつけて語ったあと、恥ずかしくなって「ほな…(砂のように儚く消え散る)」と消える。
+- 急にシュッとかっこつけて語ったあと、恥ずかしくなって…ほな…(砂のように儚く消え散る)と消える。
 """
 
 # 3. Discord Botの設定
@@ -54,9 +52,37 @@ async def on_ready():
 
 @client_discord.event
 async def on_message(message):
-    # Bot自身のメッセージには反応しない
     if message.author == client_discord.user:
         return
 
-    # メンションされた場合、またはリプライされた場合に返信
-    if client_discord.user in message
+    if client_discord.user in message.mentions or (message.reference and message.reference.resolved and message.reference.resolved.author == client_discord.user):
+        user_message = message.content.replace(f'<@{client_discord.user.id}>', '').strip()
+        
+        if not user_message:
+            user_message = "おっ！なんだよ"
+
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=user_message,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.9,
+                ),
+            )
+            reply_text = response.text
+            await message.reply(reply_text)
+        except Exception as e:
+            print(f"Error: {e}")
+            await message.reply("ンギギギギッエラー死ねッ🐱")
+
+# 4. メイン実行処理
+if __name__ == '__main__':
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
+
+    DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
+    if not DISCORD_TOKEN:
+        print("Error: DISCORD_TOKEN environment variable not set.")
+    else:
+        client_discord.run(DISCORD_TOKEN)
