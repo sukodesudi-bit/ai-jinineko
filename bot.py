@@ -48,22 +48,38 @@ client_discord = discord.Client(intents=intents)
 
 @client_discord.event
 async def on_ready():
-    print(f'Logged in as {client_discord.user} (じにちゅん起動完了)')
+    print(f'Logged in as {client_discord.user} (じにちゅん起動完了🐱)')
 
 @client_discord.event
 async def on_message(message):
+    # ボット自身のメッセージには反応しない
     if message.author == client_discord.user:
         return
 
-    if client_discord.user in message.mentions or (message.reference and message.reference.resolved and message.reference.resolved.author == client_discord.user):
-        user_message = message.content.replace(f'<@{client_discord.user.id}>', '').strip()
-        
-        if not user_message:
-            user_message = "おっ！なんだよ"
+    # 条件チェック：
+    # 1. ボットがメンションされているか？
+    # 2. メッセージの中に「ジーニス」という単語が含まれているか？
+    is_mentioned = client_discord.user.mentioned_in(message)
+    has_keyword = "ジーニス" in message.content
 
+    if not (is_mentioned or has_keyword):
+        return
+
+    # メンションされている場合はメンション部分を除去、キーワードのみの場合はそのまま使用
+    if is_mentioned:
+        user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
+    else:
+        user_message = message.content.strip()
+    
+    if not user_message:
+        user_message = "おっ！なんだよ"
+
+    # Discordのタイピング中表示を出す
+    async with message.channel.typing():
         try:
+            # 最新モデル (gemini-3.8-flash) を呼び出し
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.8-flash',
                 contents=user_message,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
