@@ -15,7 +15,10 @@ def home():
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
+
+# バックグラウンドでWebサーバーを動かす
+threading.Thread(target=run_flask, daemon=True).start()
 
 # 2. Geminiクライアントの設定
 client = genai.Client()
@@ -46,57 +49,113 @@ intents = discord.Intents.default()
 intents.message_content = True
 client_discord = discord.Client(intents=intents)
 
+# お試しチャンネルのID
+OTAMESHI_CHANNEL_ID = 1564984415636037672
+
 @client_discord.event
 async def on_ready():
-    print(f'Logged in as {client_discord.user} (じにちゅん起動完了🐱)')
+    print(f'Logged in as {client_discord.user} (じにちゅん・完全版起動完了🐱)')
 
 @client_discord.event
 async def on_message(message):
-    # ボット自身のメッセージには反応しない
-    if message.author == client_discord.user:
+    # お試しチャンネルかどうかを判定
+    is_otameshi = (message.channel.id == OTAMESHI_CHANNEL_ID)
+
+    # お試しチャンネル以外では、自分自身のメッセージには絶対に反応しない（通常チャンネルの無限ループ防止）
+    if not is_otameshi and message.author == client_discord.user:
         return
 
-    # 条件チェック：
-    # 1. ボットがメンションされているか？
-    # 2. メッセージの中に「ジーニス」という単語が含まれているか？
-    is_mentioned = client_discord.user.mentioned_in(message)
-    has_keyword = "ジーニス" in message.content
+    if is_otameshi:
+        # === お試しチャンネル用の挙動（他Bot反応可・3〜5秒遅延・1〜3行の短文） ===
+        is_mentioned = client_discord.user.mentioned_in(message)
+        has_keyword = "ジーニス" in message.content
+        is_from_any_bot = message.author.bot
 
-    if not (is_mentioned or has_keyword):
-        return
+        # メンション、キーワード、またはボットからのメッセージであれば反応する
+        if is_mentioned or has_keyword or is_from_any_bot:
+            print(f'お試しチャンネルメッセージ受信 (自分/Bot含む): {message.content}')
+            
+            # 3〜5秒の遅延
+            await asyncio.to_thread(asyncio.sleep, 4)
 
-    # メンションされている場合はメンション部分を除去、キーワードのみの場合はそのまま使用
-    if is_mentioned:
-        user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
+            try:
+                if is_mentioned:
+                    user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
+                else:
+                    user_message = message.content.strip()
+                
+                if not user_message:
+                    user_message = "おっ！なんだよ"
+
+                def call_gemini():
+                    return client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=f"以下のメッセージに対して、キャラクター設定を維持しつつ1〜3行程度の極めて短い短文で返答しろ: {user_message}",
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_INSTRUCTION,
+                            temperature=0.9,
+                        ),
+                    )
+
+                response = await asyncio.to_thread(call_gemini)
+                
+                if response and hasattr(response, 'text') and response.text:
+                    await message.reply(response.text, mention_author=(message.author != client_discord.user))
+                    print(f'お試し返信成功: {response.text}')
+                else:
+                    await message.reply("……🐱", mention_author=(message.author != client_discord.user))
+
+            except Exception as e:
+                err_code = type(e).__name__
+                print(f"エラー発生: {err_code} - {e}")
+                await message.reply(f"{err_code}")
+
     else:
-        user_message = message.content.strip()
-    
-    if not user_message:
-        user_message = "おっ！なんだよ"
+        # === 通常チャンネル用の挙動（他Bot完全無視・ユーザーのみ・即レス長文） ===
+        if message.author.bot:
+            return
 
-    # Discordのタイピング中表示を出す
-    async with message.channel.typing():
-        try:
-            # 最新モデル (gemini-3.8-flash) を呼び出し
-            response = client.models.generate_content(
-                model='gemini-3.8-flash',
-                contents=user_message,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    temperature=0.9,
-                ),
-            )
-            reply_text = response.text
-            await message.reply(reply_text)
-        except Exception as e:
-            print(f"Error: {e}")
-            await message.reply("ンギギギギッエラー死ねッ🐱")
+        is_mentioned = client_discord.user.mentioned_in(message)
+        has_keyword = "ジーニス" in message.content
+
+        if is_mentioned or has_keyword:
+            print(f'通常チャンネルメッセージ受信: {message.content}')
+            try:
+                if is_mentioned:
+                    user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
+                else:
+                    user_message = message.content.strip()
+                
+                if not user_message:
+                    user_message = "おっ！なんだよ"
+
+                async with message.channel.typing():
+                    def call_gemini():
+                        prompt = f"以下のメッセージに対して、キャラクター設定を維持しつつ詳細に長文で返答しろ: {user_message}"
+                        return client.models.generate_content(
+                            model='gemini-2.5-flash',
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                system_instruction=SYSTEM_INSTRUCTION,
+                                temperature=0.9,
+                            ),
+                        )
+
+                    response = await asyncio.to_thread(call_gemini)
+                    
+                    if response and hasattr(response, 'text') and response.text:
+                        await message.reply(response.text)
+                        print(f'通常返信成功: {response.text}')
+                    else:
+                        await message.reply("……🐱")
+
+            except Exception as e:
+                err_code = type(e).__name__
+                print(f"エラー発生: {err_code} - {e}")
+                await message.reply(f"{err_code}")
 
 # 4. メイン実行処理
 if __name__ == '__main__':
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
-
     DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
     if not DISCORD_TOKEN:
         print("Error: DISCORD_TOKEN environment variable not set.")
