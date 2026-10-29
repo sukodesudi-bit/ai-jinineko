@@ -54,7 +54,7 @@ OTAMESHI_CHANNEL_ID = 1564984415636037672
 
 @client_discord.event
 async def on_ready():
-    print(f'Logged in as {client_discord.user} (じにちゅん・完全版起動完了🐱)')
+    print(f'Logged in as {client_discord.user} (じにちゅん・20秒遅延＆エラー無視版🐱)')
 
 @client_discord.event
 async def on_message(message):
@@ -66,19 +66,19 @@ async def on_message(message):
         return
 
     if is_otameshi:
-        # === お試しチャンネル用の挙動（他Bot反応可・3〜5秒遅延・1〜3行の短文） ===
+        # === お試しチャンネル用の挙動（他Bot反応可・20秒遅延・短文・エラー時は無視） ===
         is_mentioned = client_discord.user.mentioned_in(message)
         has_keyword = "ジーニス" in message.content
         is_from_any_bot = message.author.bot
 
         # メンション、キーワード、またはボットからのメッセージであれば反応する
         if is_mentioned or has_keyword or is_from_any_bot:
-            print(f'お試しチャンネルメッセージ受信 (自分/Bot含む): {message.content}')
+            print(f'お試しチャンネルメッセージ受信 (20秒待機開始): {message.content}')
             
-            # 3〜5秒の遅延
-            await asyncio.to_thread(asyncio.sleep, 4)
-
             try:
+                # 20秒の遅延
+                await asyncio.sleep(20)
+
                 if is_mentioned:
                     user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
                 else:
@@ -106,9 +106,9 @@ async def on_message(message):
                     await message.reply("……🐱", mention_author=(message.author != client_discord.user))
 
             except Exception as e:
-                err_code = type(e).__name__
-                print(f"エラー発生: {err_code} - {e}")
-                await message.reply(f"{err_code}")
+                # エラーのときは何も書かず、完全に無視する
+                print(f"エラー発生（無視します）: {type(e).__name__} - {e}")
+                return
 
     else:
         # === 通常チャンネル用の挙動（他Bot完全無視・ユーザーのみ・即レス長文） ===
