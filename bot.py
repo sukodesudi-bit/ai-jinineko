@@ -76,8 +76,8 @@ async def on_message(message):
             print(f'お試しチャンネルメッセージ受信 (20秒待機開始): {message.content}')
             
             try:
-                # 20秒の遅延
-                await asyncio.sleep(20)
+                # 15秒の遅延
+                await asyncio.sleep(15)
 
                 if is_mentioned:
                     user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
@@ -133,7 +133,7 @@ async def on_message(message):
                     def call_gemini():
                         prompt = f"以下のメッセージに対して、キャラクター設定を維持しつつ詳細に長文で返答しろ: {user_message}"
                         return client.models.generate_content(
-                            model='gemini-2.5-flash',
+                            model='gemini-3.8-flash',
                             contents=prompt,
                             config=types.GenerateContentConfig(
                                 system_instruction=SYSTEM_INSTRUCTION,
