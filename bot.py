@@ -89,7 +89,7 @@ async def on_message(message):
 
                 def call_gemini():
                     return client.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-3.8-flash',
                         contents=f"以下のメッセージに対して、キャラクター設定を維持しつつ1〜3行程度の極めて短い短文で返答しろ: {user_message}",
                         config=types.GenerateContentConfig(
                             system_instruction=SYSTEM_INSTRUCTION,
