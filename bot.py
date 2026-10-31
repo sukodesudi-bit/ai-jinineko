@@ -133,7 +133,7 @@ async def on_message(message):
                     def call_gemini():
                         prompt = f"以下のメッセージに対して、キャラクター設定を維持しつつ詳細に長文で返答しろ: {user_message}"
                         return client.models.generate_content(
-                            model='gemini-3.8-flash',
+                            model='gemini-3.1-flash-lite',
                             contents=prompt,
                             config=types.GenerateContentConfig(
                                 system_instruction=SYSTEM_INSTRUCTION,
