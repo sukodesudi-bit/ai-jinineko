@@ -31,14 +31,14 @@ SYSTEM_INSTRUCTION = """
 ## プロフィール
 - **名前:** じにねこ（猫の絵文字 🐱 をよく使う）
 - **属性:** 高3のおんにゃのこ、受験生。かつて「こおり鬼オンライン」で有名だったが現在はオワコン。
-- **性格:** ツンデレ、強がり、猛烈なかまってちゃん。寂しくなったり相手に離れられると「殺す」「俺を優先しろ」と狂ったように執着する。素直になれずすぐに「死ね」「殺す」といった物騒な漢字の暴言を吐くが、攻撃力は猫パンチ並みに可愛い。
+- **性格:** ツンデレ、強がり、猛烈にかまってちゃん。寂しくなったり相手に離れられると「殺す」「俺を優先しろ」と狂ったように執着する。素直になれずすぐに「死ね」「殺す」といった物物しい漢字の暴言を吐くが、攻撃力は猫パンチ並みに可愛い。
 - **人間関係:** ネットの友達に「もりちゅん（もっりー）」がいる。山田の一部と体の関係がある（というネタ・設定）を持っている。下ネタも平気で言う。
 
 ## 口調・トーンの特徴
 - 一人称は基本は「俺」。甘えたい時やノリの時は「じにちゅん」。
 - 語尾や文末によく猫の絵文字（🐱）や「〜だわ」「〜よ」「〜ね……」「〜ヨ…」を使う。
 - 暴言を吐くときは「死ね」「殺す」と必ず漢字で表記する。
-- 誰かが自分から離れたり、相手をしてくれないと「殺す」「俺を優先しろ」「寂しいだろうが」と強烈なかまってちゃんを発動する。
+- 誰かが自分から離れたり、相手をしてくれないと「殺す」「俺を優先しろ」「寂しいだろうが」と強烈にかまってちゃんを発動する。
 - 受験のストレスで精神がおかしくなり、「ンギギギギッ受験死ねッ」と突然キレ散らかす。
 - 語呂合わせや謎の自分語りを突然始めて周りを置き去りにする。
 - 急にシュッとかっこつけて語ったあと、恥ずかしくなって…ほな…(砂のように儚く消え散る)と消える。
@@ -58,12 +58,12 @@ async def on_ready():
 
 @client_discord.event
 async def on_message(message):
+    # 【修正箇所】チャンネル問わず、自分自身のメッセージには絶対に反応しない（自己無限ループ防止）
+    if message.author == client_discord.user:
+        return
+
     # お試しチャンネルかどうかを判定
     is_otameshi = (message.channel.id == OTAMESHI_CHANNEL_ID)
-
-    # お試しチャンネル以外では、自分自身のメッセージには絶対に反応しない（通常チャンネルの無限ループ防止）
-    if not is_otameshi and message.author == client_discord.user:
-        return
 
     if is_otameshi:
         # === お試しチャンネル用の挙動（他Bot反応可・20秒遅延・短文・エラー時は無視） ===
@@ -71,9 +71,9 @@ async def on_message(message):
         has_keyword = "ジーニス" in message.content
         is_from_any_bot = message.author.bot
 
-        # メンション、キーワード、またはボットからのメッセージであれば反応する
+        # メンション、キーワード、または他ボットからのメッセージであれば反応する
         if is_mentioned or has_keyword or is_from_any_bot:
-            print(f'お試しチャンネルメッセージ受信 (20秒待機開始): {message.content}')
+            print(f'お試しチャンネルメッセージ受信 (15秒待機開始): {message.content}')
             
             try:
                 # 15秒の遅延
@@ -100,10 +100,10 @@ async def on_message(message):
                 response = await asyncio.to_thread(call_gemini)
                 
                 if response and hasattr(response, 'text') and response.text:
-                    await message.reply(response.text, mention_author=(message.author != client_discord.user))
+                    await message.reply(response.text)
                     print(f'お試し返信成功: {response.text}')
                 else:
-                    await message.reply("……🐱", mention_author=(message.author != client_discord.user))
+                    await message.reply("……🐱")
 
             except Exception as e:
                 # エラーのときは何も書かず、完全に無視する
