@@ -183,8 +183,8 @@ async def on_message(message):
         is_otameshi = (channel_id == OTAMESHI_CHANNEL_ID)
 
         if is_otameshi:
-            # === お試しチャンネル用の挙動（70%確率・15秒遅延・短文） ===
-            if random.random() > 0.70:
+            # === お試しチャンネル用の挙動（80%確率・15秒遅延・短文） ===
+            if random.random() > 0.80:
                 print(f"[ジーニス お試し] 確率抽選によりスルー (発言者: {message.author})")
                 return
 
