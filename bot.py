@@ -1,12 +1,15 @@
 import os
 import asyncio
+import random
 import threading
+import traceback
+from collections import defaultdict
 from flask import Flask
 import discord
 from google import genai
 from google.genai import types
 
-# 1. Render用のダミーWebサーバー
+# 1. Render/MWS用のダミーWebサーバー
 app = Flask('')
 
 @app.route('/')
@@ -21,7 +24,8 @@ def run_flask():
 threading.Thread(target=run_flask, daemon=True).start()
 
 # 2. Geminiクライアントの設定
-client = genai.Client()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else genai.Client()
 
 SYSTEM_INSTRUCTION = """
 # 役割・基本設定
@@ -44,119 +48,159 @@ SYSTEM_INSTRUCTION = """
 - 急にシュッとかっこつけて語ったあと、恥ずかしくなって…ほな…(砂のように儚く消え散る)と消える。
 """
 
+# 会話履歴のメモリ管理（直近20件を保持）
+chat_histories = defaultdict(list)
+
 # 3. Discord Botの設定
 intents = discord.Intents.default()
 intents.message_content = True
 client_discord = discord.Client(intents=intents)
 
-# お試しチャンネルのID
-OTAMESHI_CHANNEL_ID = 1564984415636037672
+# ID設定
+OTAMESHI_CHANNEL_ID = "1564984415636037672"
+DM_LOG_CHANNEL_ID = 1566285154388017292  # 管理者専用プライベートチャンネル
 
 @client_discord.event
 async def on_ready():
-    print(f'Logged in as {client_discord.user} (じにちゅん・20秒遅延＆エラー無視版🐱)')
+    print(f'Logged in as {client_discord.user} (じにちゅん・起動完了でふ🐱)')
 
 @client_discord.event
 async def on_message(message):
-    # 【修正箇所】チャンネル問わず、自分自身のメッセージには絶対に反応しない（自己無限ループ防止）
-    if message.author == client_discord.user:
-        return
-
-    # お試しチャンネルかどうかを判定
-    is_otameshi = (message.channel.id == OTAMESHI_CHANNEL_ID)
-
-    if is_otameshi:
-        # === お試しチャンネル用の挙動（他Bot反応可・20秒遅延・短文・エラー時は無視） ===
-        is_mentioned = client_discord.user.mentioned_in(message)
-        has_keyword = "ジーニス" in message.content
-        is_from_any_bot = message.author.bot
-
-        # メンション、キーワード、または他ボットからのメッセージであれば反応する
-        if is_mentioned or has_keyword or is_from_any_bot:
-            print(f'お試しチャンネルメッセージ受信 (15秒待機開始): {message.content}')
-            
-            try:
-                # 15秒の遅延
-                await asyncio.sleep(15)
-
-                if is_mentioned:
-                    user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
-                else:
-                    user_message = message.content.strip()
-                
-                if not user_message:
-                    user_message = "おっ！なんだよ"
-
-                def call_gemini():
-                    return client.models.generate_content(
-                        model='gemini-3.1-flash-lite',
-                        contents=f"以下のメッセージに対して、キャラクター設定を維持しつつ1〜3行程度の極めて短い短文で返答しろ: {user_message}",
-                        config=types.GenerateContentConfig(
-                            system_instruction=SYSTEM_INSTRUCTION,
-                            temperature=0.9,
-                        ),
-                    )
-
-                response = await asyncio.to_thread(call_gemini)
-                
-                if response and hasattr(response, 'text') and response.text:
-                    await message.reply(response.text)
-                    print(f'お試し返信成功: {response.text}')
-                else:
-                    await message.reply("……🐱")
-
-            except Exception as e:
-                # エラーのときは何も書かず、完全に無視する
-                print(f"エラー発生（無視します）: {type(e).__name__} - {e}")
-                return
-
-    else:
-        # === 通常チャンネル用の挙動（他Bot完全無視・ユーザーのみ・即レス長文） ===
-        if message.author.bot:
+    try:
+        # 自分自身のメッセージには絶対に反応しない（自己無限ループ防止）
+        if message.author == client_discord.user:
             return
 
-        is_mentioned = client_discord.user.mentioned_in(message)
-        has_keyword = "ジーニス" in message.content
+        # -------------------------------------------------------------
+        # ★【DM（ダイレクトメッセージ）の場合の処理】
+        # -------------------------------------------------------------
+        if isinstance(message.channel, discord.DMChannel):
+            print(f"[ジーニス DM受信] {message.author} からのDM: {message.content}")
+            
+            # ① プライベートチャンネルに送信者と本文を転送ログ保存
+            log_channel = client_discord.get_channel(DM_LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="📭 ジーニス DM受信ログ",
+                    description=f"**送信者:** {message.author.mention} (`{message.author}` / ID: `{message.author.id}`)\n**内容:**\n{message.content}",
+                    color=0x9b59b6
+                )
+                await log_channel.send(embed=log_embed)
 
-        if is_mentioned or has_keyword:
-            print(f'通常チャンネルメッセージ受信: {message.content}')
-            try:
-                if is_mentioned:
-                    user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
-                else:
-                    user_message = message.content.strip()
-                
-                if not user_message:
-                    user_message = "おっ！なんだよ"
+            # ② DM相手へジーニスBotが返答する処理（直近20件履歴保持）
+            user_id_str = f"dm_{message.author.id}"
+            history = chat_histories[user_id_str]
 
-                async with message.channel.typing():
-                    def call_gemini():
-                        prompt = f"以下のメッセージに対して、キャラクター設定を維持しつつ詳細に長文で返答しろ: {user_message}"
-                        return client.models.generate_content(
-                            model='gemini-3.1-flash-lite',
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                system_instruction=SYSTEM_INSTRUCTION,
-                                temperature=0.9,
-                            ),
+            async with message.channel.typing():
+                chat = client.chats.create(
+                    model='gemini-3.1-flash-lite',
+                    history=history,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION + "\n\n※【追加命令】キャラクター設定を維持しつつ詳細に長文で返答しろ。",
+                        temperature=0.9,
+                    )
+                )
+
+                response = await asyncio.to_thread(chat.send_message, f"{message.author.name}: {message.content}")
+                reply_text = response.text if response and hasattr(response, 'text') else ""
+
+                if reply_text:
+                    await message.reply(reply_text)
+                    print(f"[ジーニス DM返答成功] {message.author} へ送信完了")
+
+                    # Botの返答もプライベートチャンネルに記録
+                    if log_channel:
+                        bot_log_embed = discord.Embed(
+                            title="🐱 ジーニスのDM返答",
+                            description=f"**宛先:** {message.author.mention}\n**返答内容:**\n{reply_text}",
+                            color=0x8e44ad
                         )
+                        await log_channel.send(embed=bot_log_embed)
 
-                    response = await asyncio.to_thread(call_gemini)
-                    
-                    if response and hasattr(response, 'text') and response.text:
-                        await message.reply(response.text)
-                        print(f'通常返信成功: {response.text}')
-                    else:
-                        await message.reply("……🐱")
+                    # 履歴保存（直近20件）
+                    updated_history = chat.get_history()
+                    if len(updated_history) > 20:
+                        updated_history = updated_history[-20:]
+                    chat_histories[user_id_str] = updated_history
+            
+            return  # DM処理終了
 
-            except Exception as e:
-                err_code = type(e).__name__
-                print(f"エラー発生: {err_code} - {e}")
-                await message.reply(f"{err_code}")
+        # -------------------------------------------------------------
+        # ★【サーバー内チャンネルの場合の処理】
+        # -------------------------------------------------------------
+        is_mentioned = client_discord.user.mentioned_in(message)
+        
+        is_reply = False
+        if message.reference and message.reference.resolved:
+            if hasattr(message.reference.resolved, 'author'):
+                is_reply = (message.reference.resolved.author == client_discord.user)
+
+        has_keyword = "ジーニス" in message.content or "じにねこ" in message.content
+
+        if not (is_mentioned or is_reply or has_keyword):
+            return
+
+        if is_mentioned:
+            user_message = message.content.replace(f'<@!{client_discord.user.id}>', '').replace(f'<@{client_discord.user.id}>', '').strip()
+        else:
+            user_message = message.content.strip()
+        
+        if not user_message:
+            user_message = "おっ！なんだよ"
+
+        channel_id = str(message.channel.id)
+        is_otameshi = (channel_id == OTAMESHI_CHANNEL_ID)
+
+        if is_otameshi:
+            # === お試しチャンネル用の挙動（70%確率・15秒遅延・短文） ===
+            if random.random() > 0.70:
+                print(f"[ジーニス お試し] 確率抽選によりスルー (発言者: {message.author})")
+                return
+
+            print(f'[ジーニス お試し] 15秒待機開始 (発言者: {message.author}): {user_message}')
+            await asyncio.sleep(15)
+
+            current_instruction = SYSTEM_INSTRUCTION + "\n\n※【追加命令】キャラクター設定を維持しつつ1〜3行程度の極めて短い短文で返答しろ。"
+        else:
+            # === 通常チャンネル用の挙動（即レス長文） ===
+            print(f'[ジーニス 通常] メッセージ受信 (発言者: {message.author}): {user_message}')
+            current_instruction = SYSTEM_INSTRUCTION + "\n\n※【追加命令】キャラクター設定を維持しつつ詳細に長文で返答しろ。"
+
+        async with message.channel.typing():
+            history = chat_histories[channel_id]
+
+            chat = client.chats.create(
+                model='gemini-3.1-flash-lite',
+                history=history,
+                config=types.GenerateContentConfig(
+                    system_instruction=current_instruction,
+                    temperature=0.9,
+                )
+            )
+
+            response = await asyncio.to_thread(chat.send_message, f"{message.author.name}: {user_message}")
+            reply_text = response.text if response and hasattr(response, 'text') else ""
+
+            if reply_text:
+                await message.reply(reply_text)
+                print(f'[ジーニス 返信成功]: {reply_text[:30]}...')
+
+                # 直近20件制限で履歴更新
+                updated_history = chat.get_history()
+                if len(updated_history) > 20:
+                    updated_history = updated_history[-20:]
+                chat_histories[channel_id] = updated_history
+            else:
+                await message.reply("……🐱")
+
+    except Exception as e:
+        # エラー時はDiscordに何も出さずMWSログに記録
+        print(f"❌ ジーニス エラー発生: {e}")
+        traceback.print_exc()
 
 # 4. メイン実行処理
 if __name__ == '__main__':
-    DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
+    DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN") or os.environ.get("DISCORD_BOT_TOKEN")
     if not DISCORD_TOKEN:
         print("Error: DISCORD_TOKEN environment variable not set.")
     else:
