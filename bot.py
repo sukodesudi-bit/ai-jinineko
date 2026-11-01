@@ -46,7 +46,6 @@ SYSTEM_INSTRUCTION = """
 - 受験のストレスで精神がおかしくなり、「ンギギギギッ受験死ねッ」と突然キレ散らかす。
 - 語呂合わせや謎の自分語りを突然始めて周りを置き去りにする。
 - 急にシュッとかっこつけて語ったあと、恥ずかしくなって…ほな…(砂のように儚く消え散る)と消える。
-- 画像や動画が送信された場合は、中に何が写っているかやどんな内容かをしっかりと認識し、キャラクター設定や猫の絵文字、口調を維持したまま自然にコメントすること。
 """
 
 # 会話履歴のメモリ管理（直近20件を保持）
@@ -72,22 +71,20 @@ async def on_message(message):
         if message.author == client_discord.user:
             return
 
-        # 添付ファイル（画像や動画）のチェック & 取得
-        media_part = None
+        # 添付ファイル（画像や動画）があるかどうかの判定（AIには送らずログ保存用）
         media_url = None
         media_type_str = ""
         
         if message.attachments:
             for attachment in message.attachments:
                 content_type = attachment.content_type or ""
-                if "image" in content_type or "video" in content_type:
-                    media_bytes = await attachment.read()
-                    media_part = types.Part.from_bytes(
-                        data=media_bytes,
-                        mime_type=content_type
-                    )
+                if "image" in content_type:
                     media_url = attachment.url
-                    media_type_str = "動画" if "video" in content_type else "画像"
+                    media_type_str = "画像"
+                    break
+                elif "video" in content_type:
+                    media_url = attachment.url
+                    media_type_str = "動画"
                     break
 
         # -------------------------------------------------------------
@@ -96,10 +93,17 @@ async def on_message(message):
         if isinstance(message.channel, discord.DMChannel):
             print(f"[ジーニス DM受信] {message.author} からのDM: {message.content} (添付: {media_type_str})")
             
-            # ① プライベートチャンネルに送信者・本文・メディア（画像/動画）を記録
+            # ログ用プライベートチャンネルの確実な取得
             log_channel = client_discord.get_channel(DM_LOG_CHANNEL_ID)
+            if not log_channel:
+                try:
+                    log_channel = await client_discord.fetch_channel(DM_LOG_CHANNEL_ID)
+                except Exception as ex:
+                    print(f"⚠️ ログチャンネルの取得に失敗しました: {ex}")
+
+            # ① プライベートチャンネルに送信者・本文・メディア（画像/動画）を記録
             if log_channel:
-                log_title = f"📭 ジーニス DM受信ログ（{media_type_str}付き）" if media_part else "📭 ジーニス DM受信ログ"
+                log_title = f"📭 ジーニス DM受信ログ（{media_type_str}付き）" if media_url else "📭 ジーニス DM受信ログ"
                 log_embed = discord.Embed(
                     title=log_title,
                     description=f"**送信者:** {message.author.mention} (`{message.author}` / ID: `{message.author.id}`)\n**内容:**\n{message.content if message.content else f'*({media_type_str}のみ)*'}",
@@ -113,7 +117,7 @@ async def on_message(message):
 
                 await log_channel.send(embed=log_embed)
 
-            # ② DM相手へジーニスBotが返答する処理（マルチモーダル・直近20件履歴保持）
+            # ② DM相手へジーニスBotが返答する処理（テキストのみ・超軽量＆安全）
             user_id_str = f"dm_{message.author.id}"
             history = chat_histories[user_id_str]
 
@@ -127,14 +131,8 @@ async def on_message(message):
                     )
                 )
 
-                default_prompt = f"（ユーザーが{media_type_str}を送信しました。内容を見て反応してください）" if media_part else f"{message.author.name}: {message.content}"
-                prompt_text = message.content if message.content else default_prompt
-
-                contents_payload = [prompt_text]
-                if media_part:
-                    contents_payload.append(media_part)
-
-                response = await asyncio.to_thread(chat.send_message, contents_payload)
+                user_prompt = message.content if message.content else "（メッセージが送信されました）"
+                response = await asyncio.to_thread(chat.send_message, f"{message.author.name}: {user_prompt}")
                 reply_text = response.text if response and hasattr(response, 'text') else ""
 
                 if reply_text:
@@ -170,7 +168,7 @@ async def on_message(message):
 
         has_keyword = "ジーニス" in message.content or "じにねこ" in message.content
 
-        if not (is_mentioned or is_reply or has_keyword or media_part):
+        if not (is_mentioned or is_reply or has_keyword):
             return
 
         if is_mentioned:
@@ -178,7 +176,7 @@ async def on_message(message):
         else:
             user_message = message.content.strip()
         
-        if not user_message and not media_part:
+        if not user_message:
             user_message = "おっ！なんだよ"
 
         channel_id = str(message.channel.id)
@@ -211,14 +209,8 @@ async def on_message(message):
                 )
             )
 
-            default_prompt = f"（ユーザーが{media_type_str}を送信しました。内容を見て反応してください）" if media_part else f"{message.author.name}: {user_message}"
-            prompt_text = user_message if user_message else default_prompt
-
-            contents_payload = [prompt_text]
-            if media_part:
-                contents_payload.append(media_part)
-
-            response = await asyncio.to_thread(chat.send_message, contents_payload)
+            user_prompt = user_message if user_message else "（メッセージが送信されました）"
+            response = await asyncio.to_thread(chat.send_message, f"{message.author.name}: {user_prompt}")
             reply_text = response.text if response and hasattr(response, 'text') else ""
 
             if reply_text:
